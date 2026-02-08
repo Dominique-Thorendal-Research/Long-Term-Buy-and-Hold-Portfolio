@@ -134,22 +134,77 @@ def portfolio_return_series(returns: pd.DataFrame, weights: Dict[str, float]) ->
     return rets
 
 
-def add_cash_returns(returns: pd.DataFrame, cash_rate: float, trading_days: int = TRADING_DAYS) -> pd.DataFrame:
+def get_historical_riksbanken_rate(date: pd.Timestamp) -> float:
     """
-    Add a constant daily cash return column to a returns DataFrame.
+    Get historical Riksbanken repo rate for a given date.
+    Based on actual Riksbanken policy rates 2007-2025.
+    
+    Returns:
+        Annual repo rate as decimal (e.g., 0.035 for 3.5%)
+    """
+    # Historical Riksbanken repo rate changes
+    if date < pd.Timestamp('2009-01-01'):
+        return 0.035  # 3.5% (pre-crisis)
+    elif date < pd.Timestamp('2010-07-01'):
+        return 0.005  # 0.5% (crisis period)
+    elif date < pd.Timestamp('2021-01-01'):
+        return 0.000  # 0.0% (ultra-low rates)
+    elif date < pd.Timestamp('2022-04-01'):
+        return 0.000  # 0.0% (still near-zero)
+    elif date < pd.Timestamp('2022-09-01'):
+        return 0.0075  # 0.75%
+    elif date < pd.Timestamp('2022-11-01'):
+        return 0.015  # 1.5%
+    elif date < pd.Timestamp('2022-12-01'):
+        return 0.020  # 2.0%
+    elif date < pd.Timestamp('2023-02-01'):
+        return 0.020  # 2.0%
+    elif date < pd.Timestamp('2023-09-01'):
+        return 0.025  # 2.5%
+    elif date < pd.Timestamp('2024-01-01'):
+        return 0.0275  # 2.75%
+    elif date < pd.Timestamp('2024-05-01'):
+        return 0.035  # 3.5%
+    else:
+        return 0.035  # 3.5% (current/normalized)
+
+
+def add_cash_returns(returns: pd.DataFrame, cash_rate=None, bank_margin: float = 0.0075, 
+                     use_riksbanken: bool = True, trading_days: int = TRADING_DAYS) -> pd.DataFrame:
+    """
+    Add cash return column to a returns DataFrame.
+    Can use constant rate OR time-varying Riksbanken-based rates.
     
     Args:
         returns: DataFrame of asset returns
-        cash_rate: Annual cash interest rate (e.g., 0.01 for 1%)
+        cash_rate: Fixed annual cash rate (e.g., 0.01 for 1%). 
+                   If None and use_riksbanken=True, uses Riksbanken rates.
+        bank_margin: Bank margin over repo rate (default 0.75%). Only used with Riksbanken rates.
+        use_riksbanken: If True, uses historical Riksbanken rates + margin. If False, uses fixed cash_rate.
         trading_days: Number of trading days per year (default 252)
     
     Returns:
         DataFrame with 'Cash' column added
     """
-    daily_cash = (1 + cash_rate) ** (1 / trading_days) - 1
-    cash_col = pd.Series(daily_cash, index=returns.index, name='Cash')
     out = returns.copy()
-    out['Cash'] = cash_col
+    
+    if use_riksbanken and cash_rate is None:
+        # Time-varying rates based on Riksbanken repo rate + bank margin
+        cash_rates = []
+        for date in returns.index:
+            repo_rate = get_historical_riksbanken_rate(date)
+            effective_rate = repo_rate + bank_margin
+            daily_rate = (1 + effective_rate) ** (1 / trading_days) - 1
+            cash_rates.append(daily_rate)
+        out['Cash'] = pd.Series(cash_rates, index=returns.index)
+    else:
+        # Constant rate (backward compatible)
+        if cash_rate is None:
+            cash_rate = 0.02  # Default fallback
+        daily_cash = (1 + cash_rate) ** (1 / trading_days) - 1
+        cash_col = pd.Series(daily_cash, index=returns.index, name='Cash')
+        out['Cash'] = cash_col
+    
     return out
 
 
